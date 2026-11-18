@@ -1,20 +1,29 @@
 
-from __future__ import annotations
-
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, filedialog
 from dataclasses import dataclass
 from datetime import date, timedelta
+import csv
 
-WEIGHT_TO_PRIORITY = {1: "low", 2: "medium", 3: "high"}
-DIFF_FACTOR = {"beginner": 1.3, "intermediate": 1.1, "advanced": 0.9}
+WEIGHT_TO_PRIORITY = {
+    1: "Low",
+    2: "Medium",
+    3: "High"
+}
+
+DIFF_FACTOR = {
+    "Beginner": 1.3,
+    "Intermediate": 1.1,
+    "Advanced": 0.9
+}
+
 BASE_SESSION_MIN = 40
 
 
 @dataclass
 class SubjectInput:
     name: str
-    topics: list[str]
+    topics: list
     weight: int
 
 
@@ -24,23 +33,22 @@ class PlanInput:
     exam_date: date
     daily_hours: float
     difficulty: str
-    subjects: list[SubjectInput]
+    subjects: list
 
 
 @dataclass
 class StudyTask:
     task_date: date
     start_minute: int
-    subject: str | None
+    subject: str
     topic: str
     task_type: str
     priority: str
     duration_minutes: int
-    completed: bool = False
 
 
 @dataclass
-class _TopicQueueItem:
+class TopicQueueItem:
     subject: str
     topic: str
     weight: int
@@ -56,23 +64,44 @@ def format_time(minutes):
 
 
 def generate_schedule(plan):
+
     daily_minutes = max(60, round(plan.daily_hours * 60))
+
     factor = DIFF_FACTOR[plan.difficulty]
-    focus_span = max(25, min(50, round(BASE_SESSION_MIN / factor)))
+
+    focus_span = max(
+        25,
+        min(50, round(BASE_SESSION_MIN / factor))
+    )
+
     start = date.today()
-    days = max(1, (plan.exam_date - start).days)
+
+    days = max(
+        1,
+        (plan.exam_date - start).days
+    )
+
+    learn_phase_days = max(
+        1,
+        round(days * 0.75)
+    )
 
     queue = []
 
-    for s in plan.subjects:
-        weight = min(3, max(1, s.weight))
+    for subject in plan.subjects:
 
-        for topic in s.topics:
-            sessions = max(1, round(weight * factor))
+        weight = min(3, max(1, subject.weight))
+
+        for topic in subject.topics:
+
+            sessions = max(
+                1,
+                round(weight * factor)
+            )
 
             queue.append(
-                _TopicQueueItem(
-                    subject=s.name,
+                TopicQueueItem(
+                    subject=subject.name,
                     topic=topic,
                     weight=weight,
                     priority=WEIGHT_TO_PRIORITY[weight],
@@ -80,29 +109,36 @@ def generate_schedule(plan):
                 )
             )
 
-    queue.sort(key=lambda q: (-q.weight, q.subject))
+    queue.sort(
+        key=lambda q: (-q.weight, q.subject)
+    )
 
     tasks = []
+
     queue_idx = 0
     sessions_placed = 0
-    learn_phase_days = max(1, round(days * 0.75))
 
     for day in range(days):
-        iso = start + timedelta(days=day)
+
+        current_date = start + timedelta(days=day)
+
         revision_phase = day >= learn_phase_days
+
         remaining = daily_minutes
         start_minute = 8 * 60
         sessions_today = 0
 
         while remaining >= 25:
+
             block = None
-            task_type = "learn"
-            subject = None
+            task_type = "Learn"
+            subject_name = ""
             label = ""
-            priority = "medium"
+            priority = "Medium"
             duration = focus_span
 
             if not revision_phase:
+
                 practice_due = (
                     sessions_placed > 0
                     and sessions_placed % 3 == 0
@@ -110,49 +146,66 @@ def generate_schedule(plan):
                 )
 
                 if practice_due:
-                    block = queue[max(0, queue_idx - 1)]
-                    task_type = "practice"
-                    subject = block.subject
+
+                    block = queue[queue_idx - 1]
+
+                    task_type = "Practice"
+
                     label = f"Practice: {block.topic}"
+
+                    subject_name = block.subject
+
                     priority = block.priority
 
                 else:
+
                     if queue_idx >= len(queue):
                         break
 
                     block = queue[queue_idx]
-                    task_type = "learn"
-                    subject = block.subject
+
+                    task_type = "Learn"
+
                     label = block.topic
+
+                    subject_name = block.subject
+
                     priority = block.priority
 
             else:
+
                 covered = queue[:queue_idx]
 
                 if not covered:
                     break
 
-                pick = covered[day % len(covered)]
-                block = pick
+                block = covered[day % len(covered)]
 
                 revise = sessions_today % 2 == 0
-                task_type = "revise" if revise else "practice"
 
-                subject = pick.subject
+                task_type = (
+                    "Revise" if revise else "Practice"
+                )
 
                 label = (
-                    f"Revise: {pick.topic}"
+                    f"Revise: {block.topic}"
                     if revise
-                    else f"Practice: {pick.topic}"
+                    else f"Practice: {block.topic}"
                 )
 
-                priority = pick.priority
-                duration = (
-                    round(focus_span * 0.8)
-                    if revise else focus_span
-                )
+                subject_name = block.subject
 
-            if block is not None and task_type == "learn" and not revision_phase:
+                priority = block.priority
+
+                if revise:
+                    duration = round(focus_span * 0.8)
+
+            if (
+                block is not None
+                and task_type == "Learn"
+                and not revision_phase
+            ):
+
                 block.done += 1
 
                 if block.done >= block.sessions_needed:
@@ -164,9 +217,9 @@ def generate_schedule(plan):
 
             tasks.append(
                 StudyTask(
-                    task_date=iso,
+                    task_date=current_date,
                     start_minute=start_minute,
-                    subject=subject,
+                    subject=subject_name,
                     topic=label,
                     task_type=task_type,
                     priority=priority,
@@ -179,27 +232,29 @@ def generate_schedule(plan):
             sessions_today += 1
 
             if remaining >= 10:
-                break_min = min(15, remaining)
+
+                break_minutes = min(15, remaining)
 
                 tasks.append(
                     StudyTask(
-                        task_date=iso,
+                        task_date=current_date,
                         start_minute=start_minute,
-                        subject=None,
-                        topic="Short break",
-                        task_type="break",
-                        priority="low",
-                        duration_minutes=break_min
+                        subject="",
+                        topic="Short Break",
+                        task_type="Break",
+                        priority="Low",
+                        duration_minutes=break_minutes
                     )
                 )
 
-                start_minute += break_min
-                remaining -= break_min
+                start_minute += break_minutes
+                remaining -= break_minutes
 
         if queue_idx >= len(queue) and revision_phase:
             break
 
-    if days > 0 and queue:
+    if queue:
+
         first = queue[0]
 
         tasks.append(
@@ -207,14 +262,16 @@ def generate_schedule(plan):
                 task_date=plan.exam_date,
                 start_minute=8 * 60,
                 subject=first.subject,
-                topic=f"Final look-over: {first.topic}",
-                task_type="revise",
-                priority="high",
+                topic=f"Final Look-over: {first.topic}",
+                task_type="Revise",
+                priority="High",
                 duration_minutes=30
             )
         )
 
-    tasks.sort(key=lambda t: (t.task_date, t.start_minute))
+    tasks.sort(
+        key=lambda t: (t.task_date, t.start_minute)
+    )
 
     return tasks
 
@@ -222,195 +279,397 @@ def generate_schedule(plan):
 class StudyMateAI:
 
     def __init__(self, root):
+
         self.root = root
-        self.root.title("StudyMate AI - Smart Study Planner")
-        self.root.geometry("1150x750")
-        self.root.minsize(950, 650)
+
+        self.root.title(
+            "StudyMate AI - Smart Study Planner"
+        )
+
+        self.root.geometry("1200x760")
+
+        self.root.minsize(1000, 650)
+
+        self.root.configure(bg="#F1F5F9")
 
         self.subjects = []
+        self.tasks = []
 
         self.setup_style()
         self.create_interface()
 
     def setup_style(self):
+
         style = ttk.Style()
+
         style.theme_use("clam")
 
         style.configure(
             "Treeview",
-            rowheight=30,
-            font=("Segoe UI", 10)
+            background="white",
+            foreground="#1E293B",
+            rowheight=32,
+            fieldbackground="white",
+            font=("Segoe UI", 9)
         )
 
         style.configure(
             "Treeview.Heading",
-            font=("Segoe UI", 10, "bold")
+            background="#E2E8F0",
+            foreground="#172554",
+            font=("Segoe UI", 9, "bold"),
+            padding=8
+        )
+
+        style.map(
+            "Treeview",
+            background=[("selected", "#BFDBFE")],
+            foreground=[("selected", "#172554")]
         )
 
         style.configure(
             "TButton",
-            font=("Segoe UI", 10, "bold"),
+            font=("Segoe UI", 9, "bold"),
             padding=7
+        )
+
+        style.configure(
+            "TLabel",
+            font=("Segoe UI", 9)
+        )
+
+        style.configure(
+            "TLabelframe.Label",
+            font=("Segoe UI", 10, "bold"),
+            foreground="#172554"
         )
 
     def create_interface(self):
 
-        header = tk.Frame(self.root, bg="#172554", height=90)
+        header = tk.Frame(
+            self.root,
+            bg="#172554",
+            height=100
+        )
+
         header.pack(fill="x")
         header.pack_propagate(False)
 
         tk.Label(
             header,
             text="StudyMate AI",
-            font=("Segoe UI", 25, "bold"),
-            fg="white",
-            bg="#172554"
-        ).pack(pady=(12, 0))
+            font=("Segoe UI", 26, "bold"),
+            bg="#172554",
+            fg="white"
+        ).pack(pady=(15, 0))
 
         tk.Label(
             header,
-            text="Personalized Smart Study Planner",
-            font=("Segoe UI", 11),
-            fg="#BFDBFE",
-            bg="#172554"
+            text="Your Personal AI Study Planner",
+            font=("Segoe UI", 10),
+            bg="#172554",
+            fg="#BFDBFE"
         ).pack()
 
-        main = ttk.Frame(self.root, padding=15)
-        main.pack(fill="both", expand=True)
-
-        left = ttk.LabelFrame(
-            main,
-            text="Study Plan Details",
-            padding=15
+        main = tk.Frame(
+            self.root,
+            bg="#F1F5F9"
         )
-        left.pack(side="left", fill="y", padx=(0, 12))
 
-        right = ttk.Frame(main)
-        right.pack(side="right", fill="both", expand=True)
+        main.pack(
+            fill="both",
+            expand=True,
+            padx=15,
+            pady=15
+        )
 
-        ttk.Label(left, text="Plan Title").pack(anchor="w")
+        left = tk.Frame(
+            main,
+            bg="white",
+            width=340
+        )
 
-        self.title_entry = ttk.Entry(left, width=35)
-        self.title_entry.pack(fill="x", pady=(4, 12))
+        left.pack(
+            side="left",
+            fill="y",
+            padx=(0, 12)
+        )
+
+        left.pack_propagate(False)
+
+        right = tk.Frame(
+            main,
+            bg="white"
+        )
+
+        right.pack(
+            side="right",
+            fill="both",
+            expand=True
+        )
+
+        self.create_input_panel(left)
+        self.create_timetable_panel(right)
+
+        footer = tk.Label(
+            self.root,
+            text="Study Smarter | Stay Organized | Achieve More",
+            bg="#172554",
+            fg="white",
+            font=("Segoe UI", 9),
+            pady=8
+        )
+
+        footer.pack(fill="x", side="bottom")
+
+    def create_input_panel(self, parent):
+
+        tk.Label(
+            parent,
+            text="STUDY PLAN DETAILS",
+            font=("Segoe UI", 14, "bold"),
+            bg="white",
+            fg="#172554"
+        ).pack(anchor="w", padx=15, pady=(15, 12))
+
+        form = tk.Frame(parent, bg="white")
+        form.pack(fill="x", padx=15)
+
+        def add_label(text):
+
+            tk.Label(
+                form,
+                text=text,
+                bg="white",
+                fg="#334155",
+                font=("Segoe UI", 9, "bold")
+            ).pack(anchor="w", pady=(7, 3))
+
+        add_label("Study Plan Title")
+
+        self.title_entry = ttk.Entry(form)
+        self.title_entry.pack(fill="x")
         self.title_entry.insert(0, "Final Exam Preparation")
 
-        ttk.Label(left, text="Exam Date (YYYY-MM-DD)").pack(anchor="w")
+        add_label("Exam Date (YYYY-MM-DD)")
 
-        self.date_entry = ttk.Entry(left, width=35)
-        self.date_entry.pack(fill="x", pady=(4, 12))
+        self.date_entry = ttk.Entry(form)
+        self.date_entry.pack(fill="x")
+
         self.date_entry.insert(
             0,
             (date.today() + timedelta(days=10)).isoformat()
         )
 
-        ttk.Label(left, text="Daily Study Hours").pack(anchor="w")
+        add_label("Daily Study Hours")
 
         self.hours_var = tk.StringVar(value="4")
 
         ttk.Combobox(
-            left,
+            form,
             textvariable=self.hours_var,
-            values=["1", "2", "3", "4", "5", "6", "7", "8"],
-            state="readonly",
-            width=32
-        ).pack(fill="x", pady=(4, 12))
+            values=["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"],
+            state="readonly"
+        ).pack(fill="x")
 
-        ttk.Label(left, text="Difficulty Level").pack(anchor="w")
+        add_label("Learning Difficulty")
 
-        self.difficulty_var = tk.StringVar(value="intermediate")
+        self.difficulty_var = tk.StringVar(
+            value="Intermediate"
+        )
 
         ttk.Combobox(
-            left,
+            form,
             textvariable=self.difficulty_var,
-            values=["beginner", "intermediate", "advanced"],
-            state="readonly",
-            width=32
-        ).pack(fill="x", pady=(4, 15))
+            values=["Beginner", "Intermediate", "Advanced"],
+            state="readonly"
+        ).pack(fill="x")
 
-        ttk.Separator(left).pack(fill="x", pady=8)
+        separator = ttk.Separator(
+            parent,
+            orient="horizontal"
+        )
 
-        ttk.Label(
-            left,
-            text="Add Subject",
-            font=("Segoe UI", 12, "bold")
-        ).pack(anchor="w", pady=5)
+        separator.pack(
+            fill="x",
+            padx=15,
+            pady=12
+        )
 
-        ttk.Label(left, text="Subject Name").pack(anchor="w")
+        tk.Label(
+            parent,
+            text="ADD SUBJECTS",
+            font=("Segoe UI", 12, "bold"),
+            bg="white",
+            fg="#172554"
+        ).pack(anchor="w", padx=15, pady=5)
 
-        self.subject_entry = ttk.Entry(left)
-        self.subject_entry.pack(fill="x", pady=4)
+        subject_form = tk.Frame(parent, bg="white")
+        subject_form.pack(fill="x", padx=15)
 
-        ttk.Label(left, text="Topics (comma separated)").pack(anchor="w")
+        tk.Label(
+            subject_form,
+            text="Subject Name",
+            bg="white"
+        ).pack(anchor="w")
 
-        self.topics_entry = ttk.Entry(left)
-        self.topics_entry.pack(fill="x", pady=4)
+        self.subject_entry = ttk.Entry(subject_form)
+        self.subject_entry.pack(fill="x", pady=3)
 
-        ttk.Label(left, text="Subject Difficulty").pack(anchor="w")
+        tk.Label(
+            subject_form,
+            text="Topics (separate with commas)",
+            bg="white"
+        ).pack(anchor="w", pady=(5, 0))
+
+        self.topics_entry = ttk.Entry(subject_form)
+        self.topics_entry.pack(fill="x", pady=3)
+
+        tk.Label(
+            subject_form,
+            text="Subject Difficulty",
+            bg="white"
+        ).pack(anchor="w", pady=(5, 0))
 
         self.weight_var = tk.StringVar(value="3 - Hard")
 
         ttk.Combobox(
-            left,
+            subject_form,
             textvariable=self.weight_var,
-            values=["1 - Easy", "2 - Moderate", "3 - Hard"],
+            values=[
+                "1 - Easy",
+                "2 - Moderate",
+                "3 - Hard"
+            ],
             state="readonly"
-        ).pack(fill="x", pady=4)
+        ).pack(fill="x", pady=3)
 
         ttk.Button(
-            left,
-            text="Add Subject",
+            subject_form,
+            text="+ Add Subject",
             command=self.add_subject
         ).pack(fill="x", pady=8)
 
-        ttk.Label(
-            left,
-            text="Added Subjects",
-            font=("Segoe UI", 11, "bold")
-        ).pack(anchor="w", pady=(10, 4))
+        tk.Label(
+            parent,
+            text="YOUR SUBJECTS",
+            font=("Segoe UI", 10, "bold"),
+            bg="white",
+            fg="#172554"
+        ).pack(anchor="w", padx=15, pady=(5, 3))
 
-        self.subject_list = tk.Listbox(
-            left,
-            height=7,
-            width=35,
-            font=("Segoe UI", 9)
+        self.subject_tree = ttk.Treeview(
+            parent,
+            columns=("subject", "topics", "weight"),
+            show="headings",
+            height=5
         )
-        self.subject_list.pack(fill="x")
+
+        self.subject_tree.heading(
+            "subject",
+            text="Subject"
+        )
+
+        self.subject_tree.heading(
+            "topics",
+            text="Topics"
+        )
+
+        self.subject_tree.heading(
+            "weight",
+            text="Level"
+        )
+
+        self.subject_tree.column(
+            "subject", width=125
+        )
+
+        self.subject_tree.column(
+            "topics", width=55, anchor="center"
+        )
+
+        self.subject_tree.column(
+            "weight", width=75, anchor="center"
+        )
+
+        self.subject_tree.pack(
+            fill="x",
+            padx=15,
+            pady=3
+        )
 
         ttk.Button(
-            left,
+            parent,
             text="Remove Selected Subject",
             command=self.remove_subject
-        ).pack(fill="x", pady=7)
+        ).pack(fill="x", padx=15, pady=5)
 
         ttk.Button(
-            left,
-            text="Generate Study Plan",
+            parent,
+            text="GENERATE STUDY PLAN",
             command=self.generate
-        ).pack(fill="x", pady=(12, 4))
+        ).pack(fill="x", padx=15, pady=(12, 5))
 
         ttk.Button(
-            left,
-            text="Clear Timetable",
-            command=self.clear_timetable
-        ).pack(fill="x")
+            parent,
+            text="Clear All",
+            command=self.clear_all
+        ).pack(fill="x", padx=15, pady=3)
 
-        ttk.Label(
-            right,
-            text="Your Personalized Timetable",
-            font=("Segoe UI", 17, "bold")
-        ).pack(anchor="w", pady=(0, 12))
+    def create_timetable_panel(self, parent):
+
+        tk.Label(
+            parent,
+            text="YOUR PERSONALIZED TIMETABLE",
+            font=("Segoe UI", 16, "bold"),
+            bg="white",
+            fg="#172554"
+        ).pack(anchor="w", padx=15, pady=(15, 5))
 
         self.summary = tk.Label(
-            right,
-            text="Add your subjects and generate your study plan.",
-            font=("Segoe UI", 10),
-            fg="#475569",
-            anchor="w"
+            parent,
+            text="Add subjects and generate your study plan.",
+            font=("Segoe UI", 9),
+            bg="white",
+            fg="#64748B"
         )
-        self.summary.pack(fill="x", pady=(0, 12))
 
-        table_frame = ttk.Frame(right)
-        table_frame.pack(fill="both", expand=True)
+        self.summary.pack(
+            anchor="w",
+            padx=15,
+            pady=(0, 12)
+        )
+
+        stats = tk.Frame(
+            parent,
+            bg="white"
+        )
+
+        stats.pack(fill="x", padx=15, pady=5)
+
+        self.total_label = self.create_stat(
+            stats, "TOTAL BLOCKS", "0"
+        )
+
+        self.study_label = self.create_stat(
+            stats, "STUDY SESSIONS", "0"
+        )
+
+        self.break_label = self.create_stat(
+            stats, "BREAKS", "0"
+        )
+
+        table_frame = tk.Frame(
+            parent,
+            bg="white"
+        )
+
+        table_frame.pack(
+            fill="both",
+            expand=True,
+            padx=15,
+            pady=10
+        )
 
         columns = (
             "date",
@@ -439,8 +698,8 @@ class StudyMateAI:
         }
 
         widths = {
-            "date": 105,
-            "time": 90,
+            "date": 95,
+            "time": 85,
             "subject": 105,
             "topic": 190,
             "type": 85,
@@ -449,60 +708,127 @@ class StudyMateAI:
         }
 
         for col in columns:
-            self.tree.heading(col, text=headings[col])
+
+            self.tree.heading(
+                col,
+                text=headings[col]
+            )
+
             self.tree.column(
                 col,
                 width=widths[col],
-                minwidth=60,
+                minwidth=55,
                 anchor="center"
             )
 
-        scrollbar_y = ttk.Scrollbar(
+        scroll_y = ttk.Scrollbar(
             table_frame,
             orient="vertical",
             command=self.tree.yview
         )
 
-        scrollbar_x = ttk.Scrollbar(
+        scroll_x = ttk.Scrollbar(
             table_frame,
             orient="horizontal",
             command=self.tree.xview
         )
 
         self.tree.configure(
-            yscrollcommand=scrollbar_y.set,
-            xscrollcommand=scrollbar_x.set
+            yscrollcommand=scroll_y.set,
+            xscrollcommand=scroll_x.set
         )
 
-        self.tree.pack(side="top", fill="both", expand=True)
-        scrollbar_y.pack(side="right", fill="y")
-        scrollbar_x.pack(side="bottom", fill="x")
-
-        self.tree.tag_configure("learn", background="#DBEAFE")
-        self.tree.tag_configure("practice", background="#FEF3C7")
-        self.tree.tag_configure("revise", background="#DCFCE7")
-        self.tree.tag_configure("break", background="#F1F5F9")
-
-        footer = tk.Label(
-            self.root,
-            text="Study smarter, stay organized, achieve more!",
-            bg="#172554",
-            fg="white",
-            font=("Segoe UI", 10),
-            pady=9
+        self.tree.pack(
+            side="top",
+            fill="both",
+            expand=True
         )
-        footer.pack(fill="x", side="bottom")
+
+        scroll_y.pack(
+            side="right",
+            fill="y"
+        )
+
+        scroll_x.pack(
+            side="bottom",
+            fill="x"
+        )
+
+        self.tree.tag_configure(
+            "Learn",
+            background="#DBEAFE"
+        )
+
+        self.tree.tag_configure(
+            "Practice",
+            background="#FEF3C7"
+        )
+
+        self.tree.tag_configure(
+            "Revise",
+            background="#DCFCE7"
+        )
+
+        self.tree.tag_configure(
+            "Break",
+            background="#F1F5F9"
+        )
+
+        ttk.Button(
+            parent,
+            text="Export Timetable to CSV",
+            command=self.export_csv
+        ).pack(anchor="e", padx=15, pady=(0, 15))
+
+    def create_stat(self, parent, title, value):
+
+        card = tk.Frame(
+            parent,
+            bg="#EFF6FF",
+            padx=12,
+            pady=8
+        )
+
+        card.pack(
+            side="left",
+            fill="x",
+            expand=True,
+            padx=4
+        )
+
+        tk.Label(
+            card,
+            text=title,
+            bg="#EFF6FF",
+            fg="#475569",
+            font=("Segoe UI", 8, "bold")
+        ).pack()
+
+        label = tk.Label(
+            card,
+            text=value,
+            bg="#EFF6FF",
+            fg="#1D4ED8",
+            font=("Segoe UI", 17, "bold")
+        )
+
+        label.pack()
+
+        return label
 
     def add_subject(self):
 
         name = self.subject_entry.get().strip()
+
         topics_text = self.topics_entry.get().strip()
 
         if not name or not topics_text:
+
             messagebox.showwarning(
                 "Missing Information",
                 "Enter the subject name and topics."
             )
+
             return
 
         topics = [
@@ -512,25 +838,41 @@ class StudyMateAI:
         ]
 
         if not topics:
+
             messagebox.showwarning(
-                "Missing Topics",
+                "Invalid Topics",
                 "Enter at least one topic."
             )
+
+            return
+
+        if any(s.name.lower() == name.lower() for s in self.subjects):
+
+            messagebox.showwarning(
+                "Duplicate Subject",
+                "This subject has already been added."
+            )
+
             return
 
         weight = int(self.weight_var.get()[0])
 
-        self.subjects.append(
-            SubjectInput(
-                name=name,
-                topics=topics,
-                weight=weight
-            )
+        subject = SubjectInput(
+            name=name,
+            topics=topics,
+            weight=weight
         )
 
-        self.subject_list.insert(
-            tk.END,
-            f"{name} | {len(topics)} topics | {WEIGHT_TO_PRIORITY[weight]}"
+        self.subjects.append(subject)
+
+        self.subject_tree.insert(
+            "",
+            "end",
+            values=(
+                name,
+                len(topics),
+                WEIGHT_TO_PRIORITY[weight]
+            )
         )
 
         self.subject_entry.delete(0, tk.END)
@@ -538,69 +880,74 @@ class StudyMateAI:
 
     def remove_subject(self):
 
-        selected = self.subject_list.curselection()
+        selected = self.subject_tree.selection()
 
         if not selected:
+
             messagebox.showwarning(
                 "Select Subject",
                 "Select a subject to remove."
             )
+
             return
 
-        index = selected[0]
+        for item in selected:
 
-        self.subjects.pop(index)
-        self.subject_list.delete(index)
+            index = self.subject_tree.index(item)
 
-    def clear_timetable(self):
+            self.subjects.pop(index)
 
-        for item in self.tree.get_children():
-            self.tree.delete(item)
-
-        self.summary.config(
-            text="Timetable cleared. Generate a new study plan."
-        )
+            self.subject_tree.delete(item)
 
     def generate(self):
 
         title = self.title_entry.get().strip()
 
         if not title:
+
             messagebox.showwarning(
                 "Missing Title",
-                "Enter a study plan title."
+                "Enter your study plan title."
             )
+
             return
 
         if not self.subjects:
+
             messagebox.showwarning(
                 "No Subjects",
                 "Please add at least one subject."
             )
+
             return
 
         try:
+
             exam_date = date.fromisoformat(
                 self.date_entry.get().strip()
             )
 
             if exam_date <= date.today():
+
                 messagebox.showerror(
                     "Invalid Exam Date",
-                    "Exam date must be in the future."
+                    "Please enter a future exam date."
                 )
+
                 return
 
             daily_hours = float(self.hours_var.get())
 
-            if daily_hours <= 0:
+            if daily_hours <= 0 or daily_hours > 24:
                 raise ValueError
 
         except ValueError:
+
             messagebox.showerror(
                 "Invalid Input",
-                "Enter a valid future date and daily study hours."
+                "Check the exam date and daily study hours."
             )
+
             return
 
         plan = PlanInput(
@@ -611,52 +958,166 @@ class StudyMateAI:
             subjects=self.subjects.copy()
         )
 
-        tasks = generate_schedule(plan)
+        self.tasks = generate_schedule(plan)
+
+        self.display_timetable(plan)
+
+    def display_timetable(self, plan):
 
         for item in self.tree.get_children():
             self.tree.delete(item)
 
-        for task in tasks:
-
-            subject = task.subject if task.subject else "-"
+        for task in self.tasks:
 
             self.tree.insert(
                 "",
-                tk.END,
+                "end",
                 values=(
                     task.task_date.strftime("%d-%m-%Y"),
                     format_time(task.start_minute),
-                    subject,
+                    task.subject if task.subject else "-",
                     task.topic,
-                    task.task_type.title(),
-                    task.priority.title(),
+                    task.task_type,
+                    task.priority,
                     f"{task.duration_minutes} min"
                 ),
                 tags=(task.task_type,)
             )
 
-        study_blocks = [
-            task for task in tasks
-            if task.task_type != "break"
-        ]
+        study_sessions = sum(
+            1 for t in self.tasks
+            if t.task_type != "Break"
+        )
+
+        breaks = sum(
+            1 for t in self.tasks
+            if t.task_type == "Break"
+        )
+
+        self.total_label.config(
+            text=str(len(self.tasks))
+        )
+
+        self.study_label.config(
+            text=str(study_sessions)
+        )
+
+        self.break_label.config(
+            text=str(breaks)
+        )
 
         self.summary.config(
             text=(
-                f"{title} | {len(tasks)} total blocks | "
-                f"{len(study_blocks)} study sessions | "
-                f"{daily_hours} hours/day"
+                f"{plan.title} | "
+                f"{plan.exam_date} | "
+                f"{plan.daily_hours} hours/day | "
+                f"{plan.difficulty}"
             )
         )
 
         messagebox.showinfo(
             "Study Plan Generated",
-            f"Your personalized study timetable is ready!\n\n"
-            f"Total blocks: {len(tasks)}\n"
-            f"Study sessions: {len(study_blocks)}"
+            "Your personalized study timetable is ready!\n\n"
+            f"Total Blocks: {len(self.tasks)}\n"
+            f"Study Sessions: {study_sessions}\n"
+            f"Breaks: {breaks}"
+        )
+
+    def export_csv(self):
+
+        if not self.tasks:
+
+            messagebox.showwarning(
+                "No Timetable",
+                "Generate a study plan before exporting."
+            )
+
+            return
+
+        filename = filedialog.asksaveasfilename(
+            defaultextension=".csv",
+            filetypes=[("CSV Files", "*.csv")],
+            initialfile="StudyMateAI_Timetable.csv"
+        )
+
+        if not filename:
+            return
+
+        try:
+
+            with open(
+                filename,
+                "w",
+                newline="",
+                encoding="utf-8"
+            ) as file:
+
+                writer = csv.writer(file)
+
+                writer.writerow([
+                    "Date",
+                    "Start Time",
+                    "Subject",
+                    "Topic",
+                    "Task Type",
+                    "Priority",
+                    "Duration"
+                ])
+
+                for task in self.tasks:
+
+                    writer.writerow([
+                        task.task_date,
+                        format_time(task.start_minute),
+                        task.subject,
+                        task.topic,
+                        task.task_type,
+                        task.priority,
+                        task.duration_minutes
+                    ])
+
+            messagebox.showinfo(
+                "Export Successful",
+                "Your timetable has been exported successfully."
+            )
+
+        except OSError as error:
+
+            messagebox.showerror(
+                "Export Error",
+                str(error)
+            )
+
+    def clear_all(self):
+
+        if not messagebox.askyesno(
+            "Clear All",
+            "Are you sure you want to clear all subjects and timetable?"
+        ):
+            return
+
+        self.subjects.clear()
+        self.tasks.clear()
+
+        for item in self.subject_tree.get_children():
+            self.subject_tree.delete(item)
+
+        for item in self.tree.get_children():
+            self.tree.delete(item)
+
+        self.total_label.config(text="0")
+        self.study_label.config(text="0")
+        self.break_label.config(text="0")
+
+        self.summary.config(
+            text="Add subjects and generate your study plan."
         )
 
 
 if __name__ == "__main__":
+
     root = tk.Tk()
+
     app = StudyMateAI(root)
+
     root.mainloop()
